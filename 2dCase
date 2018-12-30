@@ -1,0 +1,55 @@
+###
+def randomDensePack2d(predicate,radius,material=-1,dim=None,cropLayers=0,rRelFuzz=0.,spheresInCell=0,memoizeDb=None,useOBB=False,memoDbg=False,color=None,returnSpherePack=None):
+   """see source of pack.randomDensePack for comments. Implemented only version with spheresInCell>0 and memoizeDb=False"""
+   import sqlite3, os.path, cPickle, time, sys, numpy
+   from math import pi
+   from yade import _packPredicates
+   assert spheresInCell > 0
+   if not dim: dim=predicate.dim()
+   if max(dim)==float('inf'): raise RuntimeError("Infinite predicate and no dimension of packing requested.")
+   center=predicate.center()
+   fullDim=dim
+   # DIFF
+   rMax = radius*(1+rRelFuzz)
+   x1 = y1 = sqrt(spheresInCell)*3*rMax
+   z1 = 10*max(dim)
+   O.switchScene(); O.resetThisScene()
+   sp=SpherePack()
+   O.periodic=True
+   O.cell.setBox((x1,y1,z1))
+   O.materials.append(FrictMat(young=3e10,density=2400))
+   vmin,vmax = Vector3().Zero,O.cell.refSize
+   vmax[2] = 0 # DIFF (making the packing 2D geometrically)
+   num=sp.makeCloud(vmin,vmax,radius,rRelFuzz,spheresInCell,True)
+   O.engines=[ForceResetter(),InsertionSortCollider([Bo1_Sphere_Aabb()],verletDist=.05*radius),InteractionLoop([Ig2_Sphere_Sphere_ScGeom()],[Ip2_FrictMat_FrictMat_FrictPhys()],[Law2_ScGeom_FrictPhys_CundallStrack()]),PeriIsoCompressor(charLen=2*radius,stresses=[-100e9,-1e8],maxUnbalanced=1e-2,doneHook='O.pause();',globalUpdateInt=5,keepProportions=True),NewtonIntegrator(damping=.6)]
+   O.materials.append(FrictMat(young=30e9,frictionAngle=.5,poisson=.3,density=1e3))
+   for s in sp: # DIFF (blocking out-of-plane DOFs of bodies
+      b = utils.sphere(s[0],s[1])
+      b.state.blockedDOFs = "zXY"
+      O.bodies.append(b)
+   O.dt=utils.PWaveTimeStep()
+   O.run(); O.wait()
+   sp=SpherePack(); sp.fromSimulation()
+   O.switchScene()
+   sp.cellFill(Vector3(fullDim[0],fullDim[1],rMax)) # DIFF
+   return filterSpherePack(predicate,sp,material=material,color=color,returnSpherePack=returnSpherePack)
+
+# tests
+from yade import pack,qt,plot
+sp = randomDensePack2d(pack.inAlignedBox((0,0,0),(2,2,2)),radius=.02,rRelFuzz=.05,spheresInCell=2000)
+#sp = randomDensePack2d(pack.inSphere((0,0,0),3),radius=.1,rRelFuzz=.5,spheresInCell=200)
+O.bodies.append(sp)
+
+plot.resetData()
+for b in O.bodies:
+   if isinstance(b.shape, Sphere):
+      plot.addData(
+          sphereCenterX = b.state.pos[0],
+          sphereCenterY = b.state.pos[1],
+          sphereCenterZ = b.state.pos[2],
+          sphereRadiusR = b.shape.radius
+          )
+plot.saveDataTxt('/home/zhiguo/pyFile/test1/txtFile/2D.txt',vars=('sphereCenterX','sphereCenterY','sphereCenterZ','sphereRadiusR'))
+
+qt.View()
+###
